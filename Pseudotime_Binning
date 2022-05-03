@@ -1,0 +1,59 @@
+# generate data
+import numpy as np
+np.random.seed(2)
+data = np.random.normal(0, 1, (500, 10))
+groups = np.repeat([0, 1], 250)
+data[groups==0,0] += 10
+data[:,1:5] *= 10
+
+# run phate
+import phate
+phate_op = phate.PHATE()
+data_phate = phate_op.fit_transform(data)
+# plot
+scprep.plot.scatter2d(data_phate, c=groups)
+
+# run pseudotime
+import anndata
+import scanpy
+# Here we create an AnnData container
+adata = anndata.AnnData(data)
+# DPT requires a root cell, depending on the orientation of your
+# plot, you should be able to use the cell with the lowest 
+# PHATE1 coordinate
+adata.uns['iroot'] = np.argmin(data_phate[:,0])
+# Run diffusion pseudotime
+scanpy.pp.pca(adata)
+scanpy.pp.neighbors(adata)
+scanpy.tl.diffmap(adata)
+scanpy.tl.dpt(adata, n_branchings=0)
+# Grab the output
+dpt = adata.obs['dpt_pseudotime'].to_numpy()
+
+# plot
+scprep.plot.scatter2d(data_phate, c=dpt)
+
+# build a knn graph
+import graphtools
+G = graphtools.Graph(data, knn=5, decay=None, kernel_symm=None)
+
+# measure knn group identity per bin of diffusion pseudotime
+step = 0.1
+bin_proportions = []
+bin_starts = np.arange(np.min(dpt), np.max(dpt), step)
+for bin_start in bin_starts:
+    # find which points sit in this bin
+    bin_points = np.argwhere((dpt >=  bin_start) & (dpt < bin_start + step)).flatten()
+    bin_proportion = []
+    for idx in bin_points:
+        # find this point's 5 nearest neighbors
+        idx_neighbors = G.kernel[idx].astype(bool).toarray().flatten()
+        # calculate proportion of neighbors from the same group
+        idx_proportion = np.mean(groups[idx_neighbors] == groups[idx])
+        bin_proportion.append(idx_proportion)
+    # take the mean across all points in the bin
+    bin_proportions.append(np.mean(bin_proportion))
+
+# plot
+import matplotlib.pyplot as plt
+plt.plot(bin_starts, bin_proportions)
